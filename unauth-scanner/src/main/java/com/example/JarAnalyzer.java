@@ -1,5 +1,7 @@
 package com.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.objectweb.asm.*;
 import org.objectweb.asm.tree.AnnotationNode; // Though not used in final visitor, good to know for alternatives
 import org.objectweb.asm.tree.ClassNode;
@@ -17,6 +19,7 @@ import java.util.regex.Pattern;
 
 public class JarAnalyzer {
 
+    private static final Logger logger = LoggerFactory.getLogger(JarAnalyzer.class);
     private static final int DEFAULT_PORT = 8080;
 
     /**
@@ -30,26 +33,32 @@ public class JarAnalyzer {
         String jarPath = processDetails.getJarPath();
         String commandLine = processDetails.getCommandLine();
         String jarName = kurzen(jarPath); // Get a short name for the JAR
+        logger.debug("Analyzing JAR: {} for process PID: {}", jarPath, processDetails.getPid());
 
-        int port = extractPort(commandLine);
+
+        logger.debug("Attempting to extract port from command line for JAR: {}", jarPath);
+        int port = extractPort(commandLine, jarName); // Pass jarName for logging
 
         try (JarFile jarFile = new JarFile(jarPath)) {
+            logger.trace("Successfully opened JAR file: {}", jarPath);
             Enumeration<JarEntry> entries = jarFile.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
+                logger.trace("Examining JAR entry: {}", entry.getName());
                 if (entry.getName().endsWith(".class")) {
+                    logger.trace("Found class file: {}", entry.getName());
                     try (InputStream classInputStream = jarFile.getInputStream(entry)) {
                         ClassReader classReader = new ClassReader(classInputStream);
-                        EndpointClassVisitor classVisitor = new EndpointClassVisitor(endpoints, jarName, port);
+                        EndpointClassVisitor classVisitor = new EndpointClassVisitor(endpoints, jarName, port, entry.getName().replace("/", ".").replace(".class", ""));
                         classReader.accept(classVisitor, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                     } catch (Exception e) {
-                        System.err.println("Error reading class file " + entry.getName() + " in JAR " + jarPath + ": " + e.getMessage());
+                        logger.warn("Error reading class file {} in JAR {}: {}. Skipping class.", entry.getName(), jarPath, e.getMessage(), e);
                         // Continue to the next class file
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error opening or reading JAR file " + jarPath + ": " + e.getMessage());
+            logger.error("Error opening or reading JAR file {}: {}", jarPath, e.getMessage(), e);
         }
         return endpoints;
     }
@@ -60,9 +69,11 @@ public class JarAnalyzer {
      * Defaults to {@value #DEFAULT_PORT} if no port argument is found.
      *
      * @param commandLine The command line string of the Java process.
+     * @param jarNameForLogging Name of the JAR for logging purposes.
      * @return The extracted port or the default port.
      */
-    private int extractPort(String commandLine) {
+    private int extractPort(String commandLine, String jarNameForLogging) {
+        logger.debug("Using regex to find port in command line: {}", commandLine);
         // Regex to find port arguments like -Dserver.port=XXXX, --server.port=XXXX,
         // -Dhttp.port=XXXX, --http.port=XXXX, -Ddw.server.applicationConnectors[0].port=XXXX etc.
         // It captures the port number (XXXX).
@@ -78,16 +89,15 @@ public class JarAnalyzer {
                 if (matcher.group(i) != null) {
                     try {
                         int port = Integer.parseInt(matcher.group(i));
-                        System.out.println("Found port " + port + " in command line for JAR based on: " + matcher.group(0));
+                        logger.debug("Found port {} in command line for JAR {} based on: {}", port, jarNameForLogging, matcher.group(0));
                         return port;
                     } catch (NumberFormatException e) {
-                        // Should not happen if regex is correct, but good to handle
-                        System.err.println("Error parsing port number from command line: " + matcher.group(i));
+                        logger.warn("Error parsing port number {} from command line for JAR {}.", matcher.group(i), jarNameForLogging, e);
                     }
                 }
             }
         }
-        System.out.println("No specific port found in command line. Defaulting to " + DEFAULT_PORT + " for JAR.");
+        logger.info("No specific port found in command line for JAR {}. Defaulting to {}", jarNameForLogging, DEFAULT_PORT);
         return DEFAULT_PORT;
     }
 
@@ -110,35 +120,45 @@ public class JarAnalyzer {
      * ASM ClassVisitor to find Spring and JAX-RS annotations for HTTP endpoints.
      */
     private static class EndpointClassVisitor extends ClassVisitor {
+        private static final Logger logger = LoggerFactory.getLogger(EndpointClassVisitor.class);
         private final List<EndpointInfo> endpoints;
         private final String jarName;
         private final int port;
         private String classLevelBasePath = "";
         private boolean isRestController = false; // Flag for Spring @RestController
         private boolean isController = false; // Flag for Spring @Controller or JAX-RS @Path
+        private String currentClassName;
 
-        public EndpointClassVisitor(List<EndpointInfo> endpoints, String jarName, int port) {
+
+        public EndpointClassVisitor(List<EndpointInfo> endpoints, String jarName, int port, String className) {
             super(Opcodes.ASM9); // Use latest ASM version
             this.endpoints = endpoints;
             this.jarName = jarName;
             this.port = port;
+            this.currentClassName = className;
+            logger.trace("Visiting class: {}. Looking for controller/endpoint annotations.", this.currentClassName);
         }
 
         @Override
         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+            logger.trace("Class {} visiting annotation: {}", currentClassName, descriptor);
             // Spring MVC/REST
             if ("Lorg/springframework/web/bind/annotation/RestController;".equals(descriptor)) {
+                logger.trace("Found @RestController on class {}", currentClassName);
                 isRestController = true;
             }
             if ("Lorg/springframework/web/bind/annotation/Controller;".equals(descriptor)) {
+                logger.trace("Found @Controller on class {}", currentClassName);
                 isController = true;
             }
             if ("Lorg/springframework/web/bind/annotation/RequestMapping;".equals(descriptor)) {
-                 // This is a class-level RequestMapping
+                 logger.trace("Found @RequestMapping on class {}", currentClassName);
+                // This is a class-level RequestMapping
                 return new PathAnnotationVisitor(extractedPath -> this.classLevelBasePath = sanitizePath(extractedPath));
             }
             // JAX-RS
             if ("Ljavax/ws/rs/Path;".equals(descriptor) || "Ljakarta/ws/rs/Path;".equals(descriptor)) {
+                logger.trace("Found JAX-RS @Path on class {}", currentClassName);
                 isController = true; // Treat JAX-RS @Path classes as controllers
                 return new PathAnnotationVisitor(extractedPath -> this.classLevelBasePath = sanitizePath(extractedPath));
             }
@@ -146,14 +166,15 @@ public class JarAnalyzer {
         }
 
         @Override
-        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+        public MethodVisitor visitMethod(int access, String name, String methodDescriptor, String signature, String[] exceptions) {
             if (!isRestController && !isController) {
-                // Only inspect methods if the class is a Controller/RestController or has a JAX-RS @Path
-                return super.visitMethod(access, name, descriptor, signature, exceptions);
+                logger.trace("Skipping method {} in class {} as it's not a designated controller/restcontroller.", name, currentClassName);
+                return super.visitMethod(access, name, methodDescriptor, signature, exceptions);
             }
+            logger.trace("Visiting method: {} in class {}. Class base path: {}", name, currentClassName, classLevelBasePath);
             // Pass class-level path and other necessary info to method visitor
-            return new EndpointMethodVisitor(super.visitMethod(access, name, descriptor, signature, exceptions),
-                                             endpoints, jarName, port, classLevelBasePath);
+            return new EndpointMethodVisitor(super.visitMethod(access, name, methodDescriptor, signature, exceptions),
+                                             endpoints, jarName, port, classLevelBasePath, currentClassName, name);
         }
 
         private String sanitizePath(String path) {
@@ -168,42 +189,52 @@ public class JarAnalyzer {
      * ASM MethodVisitor to find method-level Spring and JAX-RS annotations.
      */
     private static class EndpointMethodVisitor extends MethodVisitor {
+        private static final Logger logger = LoggerFactory.getLogger(EndpointMethodVisitor.class);
         private final List<EndpointInfo> endpoints;
         private final String jarName;
         private final int port;
         private final String classLevelBasePath;
+        private final String className;
+        private final String methodName;
 
-        public EndpointMethodVisitor(MethodVisitor methodVisitor, List<EndpointInfo> endpoints, String jarName, int port, String classLevelBasePath) {
+        public EndpointMethodVisitor(MethodVisitor methodVisitor, List<EndpointInfo> endpoints, String jarName, int port, String classLevelBasePath, String className, String methodName) {
             super(Opcodes.ASM9, methodVisitor);
             this.endpoints = endpoints;
             this.jarName = jarName;
             this.port = port;
             this.classLevelBasePath = classLevelBasePath;
+            this.className = className;
+            this.methodName = methodName;
         }
 
         @Override
         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+            logger.trace("Method {} in class {} visiting annotation: {}", methodName, className, descriptor);
             String httpMethod = null;
-            String pathSuffix = ""; // Default to empty if no specific path on method
-
             // Spring Annotations
             switch (descriptor) {
                 case "Lorg/springframework/web/bind/annotation/GetMapping;":
+                    logger.trace("Found @GetMapping on method {}", methodName);
                     httpMethod = "GET";
                     break;
                 case "Lorg/springframework/web/bind/annotation/PostMapping;":
+                    logger.trace("Found @PostMapping on method {}", methodName);
                     httpMethod = "POST";
                     break;
                 case "Lorg/springframework/web/bind/annotation/PutMapping;":
+                    logger.trace("Found @PutMapping on method {}", methodName);
                     httpMethod = "PUT";
                     break;
                 case "Lorg/springframework/web/bind/annotation/DeleteMapping;":
+                    logger.trace("Found @DeleteMapping on method {}", methodName);
                     httpMethod = "DELETE";
                     break;
                 case "Lorg/springframework/web/bind/annotation/PatchMapping;":
+                    logger.trace("Found @PatchMapping on method {}", methodName);
                     httpMethod = "PATCH";
                     break;
                 case "Lorg/springframework/web/bind/annotation/RequestMapping;": // Could be method level
+                    logger.trace("Found @RequestMapping on method {}", methodName);
                     // Needs to parse value/path and method attributes
                     return new SpringRequestMappingAnnotationVisitor(this::addEndpoint);
             }
@@ -211,42 +242,40 @@ public class JarAnalyzer {
             // JAX-RS Annotations
             switch (descriptor) {
                 case "Ljavax/ws/rs/GET;": case "Ljakarta/ws/rs/GET;":
+                    logger.trace("Found JAX-RS @GET on method {}", methodName);
                     httpMethod = "GET";
                     break;
                 case "Ljavax/ws/rs/POST;": case "Ljakarta/ws/rs/POST;":
+                    logger.trace("Found JAX-RS @POST on method {}", methodName);
                     httpMethod = "POST";
                     break;
                 case "Ljavax/ws/rs/PUT;": case "Ljakarta/ws/rs/PUT;":
+                    logger.trace("Found JAX-RS @PUT on method {}", methodName);
                     httpMethod = "PUT";
                     break;
                 case "Ljavax/ws/rs/DELETE;": case "Ljakarta/ws/rs/DELETE;":
+                    logger.trace("Found JAX-RS @DELETE on method {}", methodName);
                     httpMethod = "DELETE";
                     break;
                 case "Ljavax/ws/rs/HEAD;": case "Ljakarta/ws/rs/HEAD;":
+                    logger.trace("Found JAX-RS @HEAD on method {}", methodName);
                     httpMethod = "HEAD";
                     break;
                 case "Ljavax/ws/rs/OPTIONS;": case "Ljakarta/ws/rs/OPTIONS;":
+                    logger.trace("Found JAX-RS @OPTIONS on method {}", methodName);
                     httpMethod = "OPTIONS";
                     break;
                 case "Ljavax/ws/rs/Path;": case "Ljakarta/ws/rs/Path;": // Method-level JAX-RS Path
-                        // The PathAnnotationVisitor's callback will set methodLevelPath when it's done.
+                        logger.trace("Found JAX-RS @Path on method {}", methodName);
                         return new PathAnnotationVisitor(extractedPath -> {
                             this.methodLevelPath = sanitizePath(extractedPath);
-                            // Note: if an HTTP method annotation like @GET is also on this method,
-                            // its visitor will be called SEPARATELY. We need to ensure
-                            // that methodLevelPath is correctly used when addEndpoint is finally called.
-                            // If the @Path is the LAST annotation visited, and @GET was first,
-                            // this might be tricky. ASM visits annotations in order they appear in class file.
-                        }); // Removed the problematic "api" parameter name
+                        });
             }
 
 
             if (httpMethod != null) {
-                // For simple annotations like @GetMapping (without path value) or JAX-RS @GET
-                // The path comes from its 'value' or from a separate @Path (JAX-RS)
-                // This part needs to be more robust. @GetMapping can have a value.
                 AnnotationVisitor av = super.visitAnnotation(descriptor, visible);
-                return new PathConsumingAnnotationVisitor(av, httpMethod, this::addEndpoint); // Ensured "return new"
+                return new PathConsumingAnnotationVisitor(av, httpMethod, this::addEndpoint);
             }
 
             return super.visitAnnotation(descriptor, visible);
@@ -257,21 +286,20 @@ public class JarAnalyzer {
         private void addEndpoint(String httpMethod, String pathValue) {
             String methodPath = sanitizePath(pathValue);
             if (this.methodLevelPath != null && !this.methodLevelPath.isEmpty() && (pathValue == null || pathValue.isEmpty())) {
-                // If JAX-RS style where @Path is separate and methodPath from @GET etc. is empty
                 methodPath = this.methodLevelPath;
             }
 
             String fullPath = classLevelBasePath + methodPath;
-            if (fullPath.isEmpty()) fullPath = "/"; // Default to root if nothing specified
+            if (fullPath.isEmpty()) fullPath = "/"; 
             if (!fullPath.startsWith("/")) fullPath = "/" + fullPath;
-            fullPath = fullPath.replaceAll("//+", "/"); // Normalize multiple slashes
+            fullPath = fullPath.replaceAll("//+", "/"); 
             if (fullPath.length() > 1 && fullPath.endsWith("/")) {
                 fullPath = fullPath.substring(0, fullPath.length() - 1);
             }
 
             endpoints.add(new EndpointInfo(jarName, httpMethod, fullPath, port));
-            System.out.println("Found endpoint: " + httpMethod + " " + fullPath + " (Port: " + port + ", JAR: " + jarName + ")");
-            this.methodLevelPath = ""; // Reset for next method or annotation
+            logger.info("Discovered endpoint: {} {} (Port: {}, JAR: {})", httpMethod, fullPath, port, jarName);
+            this.methodLevelPath = ""; 
         }
 
 
@@ -288,6 +316,7 @@ public class JarAnalyzer {
      * It extracts the 'value' or 'path' attribute.
      */
     private static class PathAnnotationVisitor extends AnnotationVisitor {
+        private static final Logger logger = LoggerFactory.getLogger(PathAnnotationVisitor.class);
         private PathValueCallback callback;
         private String pathValue = ""; // Default to empty
 
@@ -298,6 +327,7 @@ public class JarAnalyzer {
 
         @Override
         public void visit(String name, Object value) {
+            logger.trace("PathAnnotationVisitor visiting attribute name: {} value: {}", name, value);
             if (("value".equals(name) || "path".equals(name)) && value instanceof String) {
                 this.pathValue = (String) value;
             } else if (("value".equals(name) || "path".equals(name)) && value instanceof String[]) {
@@ -312,10 +342,12 @@ public class JarAnalyzer {
         
         @Override
         public AnnotationVisitor visitArray(String name) {
+            logger.trace("PathAnnotationVisitor visiting array attribute name: {}", name);
             if ("value".equals(name) || "path".equals(name)) {
                 return new AnnotationVisitor(Opcodes.ASM9, super.visitArray(name)) {
                     @Override
                     public void visit(String arrayName, Object arrayValue) {
+                        logger.trace("PathAnnotationVisitor visiting array element name: {} value: {}", arrayName, arrayValue);
                         if (arrayValue instanceof String) {
                             if (pathValue.isEmpty()) { // Take the first one
                                 pathValue = (String) arrayValue;
@@ -336,6 +368,7 @@ public class JarAnalyzer {
 
         @Override
         public void visitEnd() {
+            logger.trace("PathAnnotationVisitor finished, extracted path: {}", pathValue);
             callback.onPathExtracted(this.pathValue);
             super.visitEnd();
         }
@@ -353,6 +386,7 @@ public class JarAnalyzer {
      * Specific visitor for Spring's @RequestMapping, which can define path, method, etc.
      */
     private static class SpringRequestMappingAnnotationVisitor extends AnnotationVisitor {
+        private static final Logger logger = LoggerFactory.getLogger(SpringRequestMappingAnnotationVisitor.class);
         private String path = "";
         private String[] methods = {};
         private MethodEndpointConsumer consumer;
@@ -364,6 +398,7 @@ public class JarAnalyzer {
 
         @Override
         public void visit(String name, Object value) {
+            logger.trace("SpringRequestMappingAnnotationVisitor visiting attribute name: {} value: {}", name, value);
             if (("value".equals(name) || "path".equals(name))) {
                 if (value instanceof String) {
                     this.path = (String) value;
@@ -376,13 +411,13 @@ public class JarAnalyzer {
 
         @Override
         public AnnotationVisitor visitArray(String name) {
+            logger.trace("SpringRequestMappingAnnotationVisitor visiting array attribute name: {}", name);
             if ("method".equals(name)) {
                 return new AnnotationVisitor(Opcodes.ASM9, super.visitArray(name)) {
                     List<String> foundMethods = new ArrayList<>();
                     @Override
                     public void visitEnum(String enumName, String enumDesc, String enumValue) {
-                        // enumDesc will be like "Lorg/springframework/web/bind/annotation/RequestMethod;"
-                        // enumValue will be "GET", "POST", etc.
+                        logger.trace("SpringRequestMappingAnnotationVisitor visiting enum for method: {} {} {}", enumName, enumDesc, enumValue);
                         foundMethods.add(enumValue);
                         super.visitEnum(enumName, enumDesc, enumValue);
                     }
@@ -397,6 +432,7 @@ public class JarAnalyzer {
                 return new AnnotationVisitor(Opcodes.ASM9, super.visitArray(name)) {
                     @Override
                     public void visit(String arrName, Object arrValue) {
+                         logger.trace("SpringRequestMappingAnnotationVisitor visiting array element for path: {} value: {}", arrName, arrValue);
                         if (arrValue instanceof String) {
                             if (path.isEmpty()) path = (String) arrValue; // Take first
                         }
@@ -409,15 +445,13 @@ public class JarAnalyzer {
 
         @Override
         public void visitEnd() {
+            logger.trace("SpringRequestMappingAnnotationVisitor finished, path: {}, methods: {}", path, java.util.Arrays.toString(methods));
             if (methods.length > 0) {
                 for (String method : methods) {
                     consumer.consume(method, path);
                 }
             } else {
-                // If no method specified in @RequestMapping, it defaults to all/any.
-                // For now, let's report as "ANY" or skip if we want only specific ones.
-                // Or, if path is specified, maybe assume GET? Let's stick to explicit or "ANY".
-                 consumer.consume("ANY", path); // Or make this configurable / more specific
+                 consumer.consume("ANY", path); 
             }
             super.visitEnd();
         }
@@ -431,6 +465,7 @@ public class JarAnalyzer {
      * For annotations like @GetMapping where the path is in 'value' or 'path' attribute.
      */
     private static class PathConsumingAnnotationVisitor extends AnnotationVisitor {
+        private static final Logger logger = LoggerFactory.getLogger(PathConsumingAnnotationVisitor.class);
         private final String httpMethodFixed;
         private final SpringRequestMappingAnnotationVisitor.MethodEndpointConsumer consumer;
         private String path = "";
@@ -443,6 +478,7 @@ public class JarAnalyzer {
 
         @Override
         public void visit(String name, Object value) {
+            logger.trace("PathConsumingAnnotationVisitor visiting attribute name: {} value: {}", name, value);
              if (("value".equals(name) || "path".equals(name))) {
                 if (value instanceof String) {
                     this.path = (String) value;
@@ -455,10 +491,12 @@ public class JarAnalyzer {
         
         @Override
         public AnnotationVisitor visitArray(String name) {
+            logger.trace("PathConsumingAnnotationVisitor visiting array attribute name: {}", name);
             if (("value".equals(name) || "path".equals(name))) {
                 return new AnnotationVisitor(Opcodes.ASM9, super.visitArray(name)) {
                     @Override
                     public void visit(String arrName, Object arrValue) {
+                        logger.trace("PathConsumingAnnotationVisitor visiting array element name: {} value: {}", arrName, arrValue);
                         if (arrValue instanceof String) {
                             if (path.isEmpty()) path = (String) arrValue; // Take first
                         }
@@ -471,6 +509,7 @@ public class JarAnalyzer {
 
         @Override
         public void visitEnd() {
+            logger.trace("PathConsumingAnnotationVisitor finished, httpMethod: {}, path: {}", httpMethodFixed, path);
             consumer.consume(httpMethodFixed, path);
             super.visitEnd();
         }

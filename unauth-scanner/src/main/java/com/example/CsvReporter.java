@@ -1,5 +1,7 @@
 package com.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 
@@ -10,6 +12,7 @@ import java.util.Date;
 
 public class CsvReporter {
 
+    private static final Logger logger = LoggerFactory.getLogger(CsvReporter.class);
     private static final String[] HEADERS = {"JarName", "Port", "HttpMethod", "Path"};
     private final String fileName;
     private CSVPrinter csvPrinter;
@@ -32,9 +35,9 @@ public class CsvReporter {
             // and to have explicit control, we can printRecord for headers.
             this.csvPrinter = new CSVPrinter(fileWriter, CSVFormat.DEFAULT);
             this.csvPrinter.printRecord((Object[]) HEADERS); // Cast to Object[] to avoid ambiguity
-            System.out.println("CSV report will be generated at: " + this.fileName);
+            logger.info("Unauthorized endpoints will be reported to: {}", this.fileName);
         } catch (IOException e) {
-            System.err.println("Error initializing CSVReporter: " + e.getMessage());
+            logger.error("Failed to initialize CSV writer for file {}.", this.fileName, e);
             throw e; // Re-throw to indicate initialization failure
         }
     }
@@ -46,10 +49,12 @@ public class CsvReporter {
      */
     public void addRiskEntry(EndpointInfo endpointInfo) {
         if (this.csvPrinter == null) {
-            System.err.println("CSVPrinter not initialized. Cannot add risk entry.");
+            logger.error("CSVPrinter not initialized. Cannot add risk entry for endpoint: {}", endpointInfo);
             return;
         }
         try {
+            logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Method={}, Path={}, Port={}",
+                         endpointInfo.getJarName(), endpointInfo.getHttpMethod(), endpointInfo.getFullPath(), endpointInfo.getPort());
             this.csvPrinter.printRecord(
                     endpointInfo.getJarName(),
                     endpointInfo.getPort(),
@@ -57,7 +62,7 @@ public class CsvReporter {
                     endpointInfo.getPath()
             );
         } catch (IOException e) {
-            System.err.println("Error writing record to CSV for endpoint " + endpointInfo + ": " + e.getMessage());
+            logger.error("Error writing record to CSV for endpoint {}: {}", endpointInfo, e.getMessage(), e);
         }
     }
 
@@ -70,9 +75,9 @@ public class CsvReporter {
             try {
                 this.csvPrinter.flush();
                 this.csvPrinter.close();
-                System.out.println("CSV report generation complete: " + this.fileName);
+                logger.info("CSV report {} successfully written and closed.", this.fileName);
             } catch (IOException e) {
-                System.err.println("Error closing CSVPrinter: " + e.getMessage());
+                logger.error("Error closing CSV writer for file {}.", this.fileName, e);
             }
         }
     }

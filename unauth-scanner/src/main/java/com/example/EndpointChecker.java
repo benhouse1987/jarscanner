@@ -1,5 +1,7 @@
 package com.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.*;
 import org.apache.http.entity.StringEntity;
@@ -12,12 +14,14 @@ import java.io.UnsupportedEncodingException;
 
 public class EndpointChecker {
 
+    private static final Logger logger = LoggerFactory.getLogger(EndpointChecker.class);
     private static final int CONNECT_TIMEOUT = 5000; // 5 seconds
     private static final int SOCKET_TIMEOUT = 5000;  // 5 seconds
 
     private final CloseableHttpClient httpClient;
 
     public EndpointChecker() {
+        logger.debug("Initializing EndpointChecker with connect_timeout={}ms, socket_timeout={}ms", CONNECT_TIMEOUT, SOCKET_TIMEOUT);
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectTimeout(CONNECT_TIMEOUT)
                 .setSocketTimeout(SOCKET_TIMEOUT)
@@ -26,6 +30,7 @@ public class EndpointChecker {
                 .setDefaultRequestConfig(requestConfig)
                 .disableAutomaticRetries() // Important for accurately checking a single attempt
                 .build();
+        logger.debug("HttpClient initialized.");
     }
 
     /**
@@ -41,7 +46,8 @@ public class EndpointChecker {
         String method = endpointInfo.getHttpMethod().toUpperCase();
         HttpUriRequest request;
 
-        System.out.println("Checking endpoint: " + method + " " + url);
+        logger.info("Checking endpoint: {} {} on port {}", method, endpointInfo.getPath(), endpointInfo.getPort());
+        logger.debug("Building {} request for URL: {}", method, url);
 
         try {
             switch (method) {
@@ -50,24 +56,24 @@ public class EndpointChecker {
                     break;
                 case "POST":
                     HttpPost postRequest = new HttpPost(url);
-                    // Send an empty JSON body as a common default for POST requests
                     try {
+                        logger.trace("Setting JSON request body '{}' and Content-Type header for {} request to {}", "{}", method, url);
                         postRequest.setEntity(new StringEntity("{}")); 
                         postRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
-                        // Should not happen with StringEntity and UTF-8
-                        System.err.println("Error setting entity for POST request: " + e.getMessage());
-                        return false; // Cannot proceed with malformed request
+                        logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
+                        return false; 
                     }
                     request = postRequest;
                     break;
                 case "PUT":
                     HttpPut putRequest = new HttpPut(url);
                      try {
+                        logger.trace("Setting JSON request body '{}' and Content-Type header for {} request to {}", "{}", method, url);
                         putRequest.setEntity(new StringEntity("{}"));
                         putRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
-                        System.err.println("Error setting entity for PUT request: " + e.getMessage());
+                        logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
                         return false; 
                     }
                     request = putRequest;
@@ -78,32 +84,32 @@ public class EndpointChecker {
                 case "PATCH":
                     HttpPatch patchRequest = new HttpPatch(url);
                     try {
+                        logger.trace("Setting JSON request body '{}' and Content-Type header for {} request to {}", "{}", method, url);
                         patchRequest.setEntity(new StringEntity("{}"));
                         patchRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
-                         System.err.println("Error setting entity for PATCH request: " + e.getMessage());
+                         logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
                         return false;
                     }
                     request = patchRequest;
                     break;
-                case "ANY": // Treat "ANY" or other unknown/uncommon as GET for a basic check
+                case "ANY": 
                 default:
-                    System.out.println("HTTP method '" + method + "' not specifically handled or is 'ANY'. Defaulting to GET for check.");
+                    logger.debug("HTTP method '{}' not specifically handled or is 'ANY'. Defaulting to GET for check at URL: {}", method, url);
                     request = new HttpGet(url);
                     break;
             }
 
             try (CloseableHttpResponse response = httpClient.execute(request)) {
                 int statusCode = response.getStatusLine().getStatusCode();
-                System.out.println("Response for " + method + " " + url + ": " + statusCode);
-                // Consume entity to free resources, important for connection reuse
+                logger.debug("Response for {} {}: Status {}", method, url, statusCode);
                 EntityUtils.consumeQuietly(response.getEntity()); 
                 return statusCode != 401; // At risk if not 401
             }
         } catch (IOException e) {
-            // This includes ConnectTimeoutException, SocketTimeoutException, NoHttpResponseException, ConnectException etc.
-            System.err.println("Error executing request to " + url + ": " + e.getMessage());
-            return false; // Not verifiable as at risk if an IO error occurs
+            logger.warn("Error executing request to {} {}: {}. Endpoint considered not at risk due to error.", method, url, e.getMessage());
+            logger.debug("Full exception details for {} {}:", method, url, e); 
+            return false; 
         }
     }
 
@@ -111,10 +117,12 @@ public class EndpointChecker {
      * Closes the underlying HTTP client. Should be called when the checker is no longer needed.
      */
     public void close() {
+        logger.debug("Closing HttpClient.");
         try {
             this.httpClient.close();
+            logger.info("HttpClient closed successfully.");
         } catch (IOException e) {
-            System.err.println("Error closing HttpClient: " + e.getMessage());
+            logger.error("Error closing HttpClient.", e);
         }
     }
 }

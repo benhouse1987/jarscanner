@@ -1,5 +1,8 @@
 package com.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.List;
 
@@ -10,9 +13,12 @@ import java.util.List;
  * are accessible without authorization, and reports at-risk endpoints to a CSV file.
  */
 public class Main {
-    public static void main(String[] args) {
-        System.out.println("Starting Unauthorized Endpoint Scanner...");
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
+    public static void main(String[] args) {
+        logger.info("Starting Unauthorized Endpoint Scanner...");
+
+        logger.debug("Initializing components: ProcessScanner, JarAnalyzer, EndpointChecker, CsvReporter");
         ProcessScanner scanner = new ProcessScanner();
         JarAnalyzer jarAnalyzer = new JarAnalyzer();
         EndpointChecker endpointChecker = new EndpointChecker();
@@ -25,41 +31,47 @@ public class Main {
         try {
             try {
                 csvReporter = new CsvReporter();
-                System.out.println("Reporting unauthorized endpoints to: " + csvReporter.getFileName());
+                // This is already logged by CsvReporter constructor, no need to repeat here.
+                // logger.info("Reporting unauthorized endpoints to: {}", csvReporter.getFileName());
             } catch (IOException e) {
-                System.err.println("CRITICAL: Failed to initialize CsvReporter. No report will be generated. Error: " + e.getMessage());
+                logger.error("CRITICAL: Failed to initialize CsvReporter. No report will be generated.", e);
                 // Continue execution without CSV reporting if initialization fails
             }
 
+            logger.debug("Attempting to get list of running Java applications.");
             List<JavaProcessDetails> runningJavaApps = scanner.getRunningJavaApplications();
             processesScanned = runningJavaApps.size();
 
             if (runningJavaApps.isEmpty()) {
-                System.out.println("No running Java applications found to analyze.");
+                logger.info("No running Java applications found to analyze.");
             } else {
-                System.out.println("Found " + processesScanned + " running Java application(s) to analyze.");
+                logger.info("Found {} running Java application(s) to analyze.", processesScanned);
 
                 for (JavaProcessDetails appDetails : runningJavaApps) {
-                    System.out.println("\nAnalyzing application: " + appDetails.getJarPath() + " (PID: " + appDetails.getPid() + ")");
-                    System.out.println("  Command Line: " + appDetails.getCommandLine());
+                    logger.debug("Processing Java application: {} (PID: {})", appDetails.getJarPath(), appDetails.getPid());
+                    logger.debug("Application command line: {}", appDetails.getCommandLine());
 
                     if (appDetails.getJarPath() == null || !appDetails.getJarPath().toLowerCase().endsWith(".jar")) {
-                        System.out.println("  Skipping analysis: Path does not point to a .jar file.");
+                        logger.info("Skipping analysis for PID {}: Path {} does not point to a .jar file or is null.", appDetails.getPid(), appDetails.getJarPath());
                         continue;
                     }
 
                     List<EndpointInfo> endpoints;
                     try {
+                        logger.debug("Attempting to extract endpoints from {}", appDetails.getJarPath());
                         endpoints = jarAnalyzer.extractEndpoints(appDetails);
+                        logger.debug("Found {} endpoints for {}", endpoints.size(), appDetails.getJarPath());
+
                         if (endpoints.isEmpty()) {
-                            System.out.println("  No HTTP endpoints found in " + appDetails.getJarPath());
+                            logger.info("No HTTP endpoints found in {}", appDetails.getJarPath());
                         } else {
-                            System.out.println("  Found " + endpoints.size() + " potential endpoint(s) for " + appDetails.getJarPath() + ":");
+                            // The previous log "Found X endpoints for Y" is sufficient, no need for this one.
+                            // logger.info("  Found {} potential endpoint(s) for {}:", endpoints.size(), appDetails.getJarPath());
                             totalEndpointsFound += endpoints.size();
                             for (EndpointInfo endpoint : endpoints) {
-                                System.out.println("    - Checking: " + endpoint);
+                                logger.debug("Checking endpoint: {} {} for JAR {}", endpoint.getHttpMethod(), endpoint.getFullPath(), endpoint.getJarName());
                                 boolean atRisk = endpointChecker.isEndpointAtRisk(endpoint);
-                                System.out.println("      Risk status: " + (atRisk ? "AT RISK (Accessible without 401)" : "NOT AT RISK (Returned 401 or error)"));
+                                logger.info("Endpoint {} {} risk status: {}", endpoint.getHttpMethod(), endpoint.getFullPath(), (atRisk ? "AT RISK" : "NOT AT RISK"));
                                 if (atRisk) {
                                     totalAtRiskEndpoints++;
                                     if (csvReporter != null) {
@@ -69,31 +81,31 @@ public class Main {
                             }
                         }
                     } catch (Exception e) {
-                        System.err.println("  Error during JAR analysis or endpoint checking for " + appDetails.getJarPath() + ": " + e.getMessage());
-                        // e.printStackTrace(); // Uncomment for detailed debugging
+                        logger.error("Error during JAR analysis or endpoint checking for {}: {}", appDetails.getJarPath(), e.getMessage(), e);
                     }
                 }
             }
         } catch (Exception e) {
             // Catch any other unexpected exceptions during the main execution.
-            System.err.println("\nUNEXPECTED ERROR: An unexpected error occurred during the scan: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("UNEXPECTED ERROR: An unexpected error occurred during the scan.", e);
         } finally {
-            System.out.println("\n--- Scan Summary ---");
-            System.out.println("Java Applications Scanned: " + processesScanned);
-            System.out.println("Total Endpoints Found: " + totalEndpointsFound);
-            System.out.println("Total At-Risk Endpoints: " + totalAtRiskEndpoints);
+            logger.info("--- Scan Summary ---"); // Removed \n as per general practice, logback will add it.
+            logger.info("Java Applications Scanned: {}", processesScanned);
+            logger.info("Total Endpoints Found: {}", totalEndpointsFound);
+            logger.info("Total At-Risk Endpoints: {}", totalAtRiskEndpoints);
 
             if (endpointChecker != null) {
+                logger.debug("Closing EndpointChecker resources.");
                 endpointChecker.close();
-                System.out.println("EndpointChecker resources released.");
+                // logger.info("EndpointChecker resources released."); // This is already logged by EndpointChecker.close()
             }
             if (csvReporter != null) {
+                logger.debug("Closing CsvReporter resources.");
                 csvReporter.close(); // This logs its own completion message
             } else {
-                System.out.println("CSV Reporter was not initialized. No report generated.");
+                logger.info("CSV Reporter was not initialized. No report generated.");
             }
-            System.out.println("\nUnauthorized Endpoint Scanner finished.");
+            logger.info("Unauthorized Endpoint Scanner finished."); // Removed \n
         }
     }
 }
