@@ -11,12 +11,15 @@ import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.util.regex.Pattern;
 
 public class EndpointChecker {
 
     private static final Logger logger = LoggerFactory.getLogger(EndpointChecker.class);
     private static final int CONNECT_TIMEOUT = 5000; // 5 seconds
     private static final int SOCKET_TIMEOUT = 5000;  // 5 seconds
+    private static final String PATH_VARIABLE_PLACEHOLDER = "1";
+    private static final Pattern PATH_VARIABLE_PATTERN = Pattern.compile("\\{[^/]+?\\}");
 
     private final CloseableHttpClient httpClient;
 
@@ -42,11 +45,18 @@ public class EndpointChecker {
      *         {@code false} if it returns 401 or an error occurs.
      */
     public boolean isEndpointAtRisk(EndpointInfo endpointInfo) {
-        String url = "http://localhost:" + endpointInfo.getPort() + endpointInfo.getPath();
+        String originalPath = endpointInfo.getPath();
+        String sanitizedPath = PATH_VARIABLE_PATTERN.matcher(originalPath).replaceAll(PATH_VARIABLE_PLACEHOLDER);
+
+        if (!originalPath.equals(sanitizedPath)) {
+            logger.debug("Path variable(s) found in original path \"{}\". Sanitized to \"{}\" for checking.", originalPath, sanitizedPath);
+        }
+
+        String url = "http://localhost:" + endpointInfo.getPort() + sanitizedPath;
         String method = endpointInfo.getHttpMethod().toUpperCase();
         HttpUriRequest request;
 
-        logger.info("Checking endpoint: {} {} on port {}", method, endpointInfo.getPath(), endpointInfo.getPort());
+        logger.info("Checking endpoint: {} {} (on port {}){}", method, originalPath, endpointInfo.getPort(), originalPath.equals(sanitizedPath) ? "" : " [actual URL checked: " + url + "]");
         logger.debug("Building {} request for URL: {}", method, url);
 
         try {
@@ -102,12 +112,12 @@ public class EndpointChecker {
 
             try (CloseableHttpResponse response = httpClient.execute(request)) {
                 int statusCode = response.getStatusLine().getStatusCode();
-                logger.debug("Response for {} {}: Status {}", method, url, statusCode);
+                logger.debug("Response for {} request to {}: Status {}", method, url, statusCode);
                 EntityUtils.consumeQuietly(response.getEntity()); 
                 return statusCode != 401; // At risk if not 401
             }
         } catch (IOException e) {
-            logger.warn("Error executing request to {} {}: {}. Endpoint considered not at risk due to error.", method, url, e.getMessage());
+            logger.warn("Error executing {} request to {}: {}. Endpoint considered not at risk due to error.", method, url, e.getMessage());
             logger.debug("Full exception details for {} {}:", method, url, e); 
             return false; 
         }
