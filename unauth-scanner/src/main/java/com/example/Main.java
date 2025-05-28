@@ -69,9 +69,9 @@ public class Main {
                             // logger.info("  Found {} potential endpoint(s) for {}:", endpoints.size(), appDetails.getJarPath());
                             totalEndpointsFound += endpoints.size();
                             for (EndpointInfo endpoint : endpoints) {
-                                logger.debug("Checking endpoint: {} {} for JAR {}", endpoint.getHttpMethod(), endpoint.getFullPath(), endpoint.getJarName());
+                                logger.debug("Checking endpoint: {} {} for JAR {}", endpoint.getHttpMethod(), endpoint.getPath(), endpoint.getJarName());
                                 boolean atRisk = endpointChecker.isEndpointAtRisk(endpoint);
-                                logger.info("Endpoint {} {} risk status: {}", endpoint.getHttpMethod(), endpoint.getFullPath(), (atRisk ? "AT RISK" : "NOT AT RISK"));
+                                logger.info("Endpoint {} {} risk status: {}", endpoint.getHttpMethod(), endpoint.getPath(), (atRisk ? "AT RISK" : "NOT AT RISK"));
                                 if (atRisk) {
                                     totalAtRiskEndpoints++;
                                     if (csvReporter != null) {
