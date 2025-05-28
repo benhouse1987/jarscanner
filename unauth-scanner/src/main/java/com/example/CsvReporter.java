@@ -54,7 +54,7 @@ public class CsvReporter {
         }
         try {
             logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Method={}, Path={}, Port={}",
-                         endpointInfo.getJarName(), endpointInfo.getHttpMethod(), endpointInfo.getFullPath(), endpointInfo.getPort());
+                         endpointInfo.getJarName(), endpointInfo.getHttpMethod(), endpointInfo.getPath(), endpointInfo.getPort());
             this.csvPrinter.printRecord(
                     endpointInfo.getJarName(),
                     endpointInfo.getPort(),

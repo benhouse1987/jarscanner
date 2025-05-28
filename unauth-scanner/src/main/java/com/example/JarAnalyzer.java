@@ -78,9 +78,15 @@ public class JarAnalyzer {
         // -Dhttp.port=XXXX, --http.port=XXXX, -Ddw.server.applicationConnectors[0].port=XXXX etc.
         // It captures the port number (XXXX).
         Pattern portPattern = Pattern.compile(
-                "(?:-D|-{1,2})server\\.port=(\\d+)|" +
-                "(?:-D|-{1,2})http\\.port=(\\d+)|" +
-                "(?:-D|-{1,2})dw\\.server(?:\\.applicationConnectors\\[\\d+\\])?\\.port=(\\d+)" // Dropwizard
+                "(?:-D|-{1,2})server\\.port=(\\d+)|" +              // Spring Boot, etc.
+                "(?:-D|-{1,2})http\\.port=(\\d+)|" +               // Common generic
+                "(?:-D|-{1,2})dw\\.server(?:\\.applicationConnectors\\[\\d+\\])?\\.port=(\\d+)|" + // Dropwizard
+                "(?:-D|-{1,2})port=(\\d+)|" +                       // Generic -Dport or --port
+                "(?:-D|-{1,2})HTTP_PORT=(\\d+)|" +                  // Env style HTTP_PORT (upper or lower case)
+                "(?:-D|-{1,2})http_port=(\\d+)|" +                  // Env style http_port (lower case)
+                "(?:-D|-{1,2})micronaut\\.server\\.port=(\\d+)|" +  // Micronaut
+                "(?:-D|-{1,2})quarkus\\.http\\.port=(\\d+)" +       // Quarkus
+                "" // Placeholder for potentially adding more later without breaking the | structure
         );
         Matcher matcher = portPattern.matcher(commandLine);
 
