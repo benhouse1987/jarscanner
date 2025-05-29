@@ -40,5 +40,5 @@ jobs:
     - name: 上传release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: 1111
+        tag_name: release
         files: target/unauth-scanner-1.0-SNAPSHOT.jar
