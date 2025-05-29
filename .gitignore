@@ -1,0 +1,175 @@
+# Personal Profile
+######################
+/src/main/resources/config/application-local*
+#/src/main/resources/font
+/src/main/resources/hystrix/hystrix-property-local*
+logback-local-lichao.xml
+######################
+/src/main/resources/.h2.server.properties
+######################
+/src/main/java/com/handchina/yunmart/artemis/web/apidoc.json
+######################
+# Project Specific
+######################
+/src/main/webapp/assets/styles/main.css
+/src/main/webapp/dist
+/src/main/webapp/bower_components
+
+######################
+# Node
+######################
+/node/**
+/node_modules/**
+
+######################
+# SASS
+######################
+.sass-cache/**
+
+######################
+# Eclipse
+######################
+*.pydevproject
+.project
+.metadata
+/bin/**
+/tmp/**
+/tmp/**/*
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.classpath
+.settings/**
+.loadpath
+
+# External tool builders
+.externalToolBuilders/**
+
+# Locally stored "Eclipse launch configurations"
+*.launch
+
+# CDT-specific
+.cproject
+
+# PDT-specific
+.buildpath
+
+######################
+# Intellij
+######################
+.idea/**
+*.iml
+*.iws
+*.ipr
+*.ids
+*.orig
+
+######################
+# Maven
+######################
+/log/**
+/target/**
+/apidocArtemis/**
+######################
+# Gradle
+######################
+.gradle/**
+
+######################
+# Package Files
+######################
+*.log
+*.gz
+*.jar
+*.war
+*.ear
+*.db
+
+######################
+# Windows
+######################
+# Windows image file caches
+Thumbs.db
+
+# Folder config file
+Desktop.ini
+
+######################
+# Mac OSX
+######################
+.DS_Store
+.svn
+
+# Thumbnails
+._*
+
+# Files that might appear on external disk
+.Spotlight-V100
+.Trashes
+
+######################
+# Directories
+######################
+/build/**
+/bin/**
+/spring_loaded/**
+/deploy/**
+
+######################
+# Logs
+######################
+*.log
+
+######################
+# Others
+######################
+*.class
+*.*~
+*~
+.merge_file*
+
+######################
+# Gradle Wrapper
+######################
+!gradle/wrapper/gradle-wrapper.jar
+
+######################
+# Maven Wrapper
+######################
+!.mvn/wrapper/maven-wrapper.jar
+
+
+.h2.server.properties
+
+
+application-markfred.yml
+application-vance.yml
+application-transy.yml
+logback-vance.xml
+logback-local.xml
+
+######################
+#git patch
+######################
+*-patch*.diff
+######################
+doc/**
+
+
+src/main/resources/config/logback/logback-local.xml
+/target/
+
+/.factorypath
+/helios-api-doc/
+.vscode/**
+
+
+/logs/*.log*
+
+!/src/main/resources/lib/Aisino-OpenPlatform-SDK-JAVA-1.3.1.jar
+!/src/main/resources/lib/kxl-invoice-sdk-dependencies.jar
+!/src/main/resources/lib/edspen-tool-0.0.1-all.jar
+/src/main/resources/config/logback/logback-local-uat.xml
+appserver/**

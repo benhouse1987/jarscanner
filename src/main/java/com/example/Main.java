@@ -14,13 +14,14 @@ import java.util.List;
  */
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
+    public static final String APP_VERSION = "1.1.0";
 
     public static void main(String[] args) {
-        logger.info("Starting Unauthorized Endpoint Scanner...");
+        logger.info("Starting Unauthorized Endpoint Scanner v{}...", APP_VERSION);
 
-        logger.debug("Initializing components: ProcessScanner, JarAnalyzer, EndpointChecker, CsvReporter");
+        logger.debug("Initializing components: ProcessScanner, ApplicationAnalyzer, EndpointChecker, CsvReporter");
         ProcessScanner scanner = new ProcessScanner();
-        JarAnalyzer jarAnalyzer = new JarAnalyzer();
+        ApplicationAnalyzer jarAnalyzer = new ApplicationAnalyzer();
         EndpointChecker endpointChecker = new EndpointChecker();
         CsvReporter csvReporter = null;
 
@@ -51,14 +52,16 @@ public class Main {
                     logger.debug("Processing Java application: {} (PID: {})", appDetails.getJarPath(), appDetails.getPid());
                     logger.debug("Application command line: {}", appDetails.getCommandLine());
 
-                    if (appDetails.getJarPath() == null || !appDetails.getJarPath().toLowerCase().endsWith(".jar")) {
-                        logger.info("Skipping analysis for PID {}: Path {} does not point to a .jar file or is null.", appDetails.getPid(), appDetails.getJarPath());
+                    if (appDetails.getJarPath() == null || !(appDetails.getJarPath().toLowerCase().endsWith(".jar") || appDetails.getJarPath().toLowerCase().endsWith(".war"))) {
+                        logger.info("Skipping analysis for PID {}: Path {} does not point to a .jar or .war file or is null.", appDetails.getPid(), appDetails.getJarPath());
                         continue;
                     }
 
                     List<EndpointInfo> endpoints;
                     try {
                         logger.debug("Attempting to extract endpoints from {}", appDetails.getJarPath());
+                        // Ensure appDetails.getJarPath() is now appDetails.getAppPath() if that changed in JavaProcessDetails
+                        // For now, assuming getJarPath() is still the correct method for the application file path
                         endpoints = jarAnalyzer.extractEndpoints(appDetails);
                         logger.debug("Found {} endpoints for {}", endpoints.size(), appDetails.getJarPath());
 
@@ -69,7 +72,8 @@ public class Main {
                             // logger.info("  Found {} potential endpoint(s) for {}:", endpoints.size(), appDetails.getJarPath());
                             totalEndpointsFound += endpoints.size();
                             for (EndpointInfo endpoint : endpoints) {
-                                logger.debug("Checking endpoint: {} {} for JAR {}", endpoint.getHttpMethod(), endpoint.getPath(), endpoint.getJarName());
+                                // Changed JarName to AppName for clarity, as it can be JAR or WAR
+                                logger.debug("Checking endpoint: {} {} for App {}", endpoint.getHttpMethod(), endpoint.getPath(), endpoint.getJarName());
                                 boolean atRisk = endpointChecker.isEndpointAtRisk(endpoint);
                                 logger.info("Endpoint {} {} risk status: {}", endpoint.getHttpMethod(), endpoint.getPath(), (atRisk ? "AT RISK" : "NOT AT RISK"));
                                 if (atRisk) {
@@ -81,7 +85,7 @@ public class Main {
                             }
                         }
                     } catch (Exception e) {
-                        logger.error("Error during JAR analysis or endpoint checking for {}: {}", appDetails.getJarPath(), e.getMessage(), e);
+                        logger.error("Error during application analysis or endpoint checking for {}: {}", appDetails.getJarPath(), e.getMessage(), e);
                     }
                 }
             }
