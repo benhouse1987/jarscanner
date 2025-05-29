@@ -13,6 +13,10 @@ on:
     branches: [ "feature/unauthorized-endpoint-scanner" ]
   pull_request:
     branches: [ "feature/unauthorized-endpoint-scanner" ]
+    
+permissions:
+  contents: write
+  security-events: write
 
 jobs:
   build:
