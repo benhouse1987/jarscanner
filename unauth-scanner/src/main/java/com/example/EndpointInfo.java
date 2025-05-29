@@ -5,12 +5,14 @@ public class EndpointInfo {
     private final String httpMethod;
     private final String path;
     private final int port;
+    private final String contextPath;
 
-    public EndpointInfo(String jarName, String httpMethod, String path, int port) {
+    public EndpointInfo(String jarName, String httpMethod, String path, int port, String contextPath) {
         this.jarName = jarName;
         this.httpMethod = httpMethod;
         this.path = path;
         this.port = port;
+        this.contextPath = contextPath;
     }
 
     public String getJarName() {
@@ -29,6 +31,10 @@ public class EndpointInfo {
         return port;
     }
 
+    public String getContextPath() {
+        return contextPath;
+    }
+
     @Override
     public String toString() {
         return "EndpointInfo{" +
@@ -36,6 +42,7 @@ public class EndpointInfo {
                ", httpMethod='" + httpMethod + '\'' +
                ", path='" + path + '\'' +
                ", port=" + port +
+               ", contextPath='" + contextPath + '\'' +
                '}';
     }
 }

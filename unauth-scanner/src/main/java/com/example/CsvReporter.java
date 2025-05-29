@@ -13,7 +13,7 @@ import java.util.Date;
 public class CsvReporter {
 
     private static final Logger logger = LoggerFactory.getLogger(CsvReporter.class);
-    private static final String[] HEADERS = {"JarName", "Port", "HttpMethod", "Path"};
+    private static final String[] HEADERS = {"JarName", "Port", "HttpMethod", "ContextPath", "Path"};
     private final String fileName;
     private CSVPrinter csvPrinter;
 
@@ -53,12 +53,18 @@ public class CsvReporter {
             return;
         }
         try {
-            logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Method={}, Path={}, Port={}",
-                         endpointInfo.getJarName(), endpointInfo.getHttpMethod(), endpointInfo.getPath(), endpointInfo.getPort());
+            String contextPath = endpointInfo.getContextPath() == null ? "" : endpointInfo.getContextPath();
+            logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Port={}, Method={}, ContextPath='{}', Path={}",
+                         endpointInfo.getJarName(),
+                         endpointInfo.getPort(),
+                         endpointInfo.getHttpMethod(),
+                         contextPath,
+                         endpointInfo.getPath());
             this.csvPrinter.printRecord(
                     endpointInfo.getJarName(),
                     endpointInfo.getPort(),
                     endpointInfo.getHttpMethod(),
+                    contextPath,
                     endpointInfo.getPath()
             );
         } catch (IOException e) {

@@ -38,33 +38,57 @@ public class JarAnalyzer {
         List<EndpointInfo> endpoints = new ArrayList<>();
         String jarPath = processDetails.getJarPath();
         String commandLine = processDetails.getCommandLine();
-        String jarName = kurzen(jarPath); // Get a short name for the JAR
+        String jarName = kurzen(jarPath);
         logger.debug("Analyzing JAR: {} for process PID: {}", jarPath, processDetails.getPid());
 
+        int port = extractPort(commandLine, jarPath, jarName);
+        String contextPath = ""; // Initialize contextPath to empty string
 
-        logger.debug("Attempting to extract port from command line for JAR: {}", jarPath);
-        int port = extractPort(commandLine, jarPath, jarName); // Pass jarPath for config file reading
+        try (JarFile jarFileForConfig = new JarFile(jarPath)) { 
+            String extractedCtxPath = extractContextPathFromJar(jarFileForConfig, jarName);
+            if (extractedCtxPath != null && !extractedCtxPath.isEmpty()) {
+                 contextPath = extractedCtxPath.trim();
+                 if (!contextPath.startsWith("/")) {
+                     contextPath = "/" + contextPath;
+                 }
+                 // Remove trailing slash only if it's not the root context "/"
+                 if (contextPath.endsWith("/") && contextPath.length() > 1) { 
+                     contextPath = contextPath.substring(0, contextPath.length() - 1);
+                 }
+                 // If contextPath became just "/", treat it as no context path to avoid issues.
+                 if (contextPath.equals("/")) { 
+                     contextPath = ""; 
+                 }
+                 if (!contextPath.isEmpty()) { // Log only if there's a meaningful context path
+                     logger.info("Using context path '{}' for JAR {}", contextPath, jarName);
+                 } else {
+                     logger.info("No context path configured or context path is root for JAR {}", jarName);
+                 }
+            } else {
+                 logger.info("No context path configured for JAR {}", jarName);
+            }
+        } catch (IOException e) {
+            logger.warn("Error opening JAR file {} to read context path config: {}. Proceeding without context path.", jarPath, e.getMessage(), e);
+            // contextPath remains ""
+        }
 
-        try (JarFile jarFile = new JarFile(jarPath)) {
-            logger.trace("Successfully opened JAR file: {}", jarPath);
+        try (JarFile jarFile = new JarFile(jarPath)) { 
+            logger.trace("Successfully opened JAR file for class analysis: {}", jarPath);
             Enumeration<JarEntry> entries = jarFile.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
-                logger.trace("Examining JAR entry: {}", entry.getName());
                 if (entry.getName().endsWith(".class")) {
-                    logger.trace("Found class file: {}", entry.getName());
                     try (InputStream classInputStream = jarFile.getInputStream(entry)) {
                         ClassReader classReader = new ClassReader(classInputStream);
-                        EndpointClassVisitor classVisitor = new EndpointClassVisitor(endpoints, jarName, port, entry.getName().replace("/", ".").replace(".class", ""));
+                        EndpointClassVisitor classVisitor = new EndpointClassVisitor(endpoints, jarName, port, contextPath, entry.getName().replace("/", ".").replace(".class", ""));
                         classReader.accept(classVisitor, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                     } catch (Exception e) {
                         logger.warn("Error reading class file {} in JAR {}: {}. Skipping class.", entry.getName(), jarPath, e.getMessage(), e);
-                        // Continue to the next class file
                     }
                 }
             }
         } catch (Exception e) {
-            logger.error("Error opening or reading JAR file {}: {}", jarPath, e.getMessage(), e);
+            logger.error("Error opening or reading JAR file for class analysis {}: {}", jarPath, e.getMessage(), e);
         }
         return endpoints;
     }
@@ -309,19 +333,21 @@ public class JarAnalyzer {
         private final List<EndpointInfo> endpoints;
         private final String jarName;
         private final int port;
+        private final String contextPath;
         private String classLevelBasePath = "";
         private boolean isRestController = false; // Flag for Spring @RestController
         private boolean isController = false; // Flag for Spring @Controller or JAX-RS @Path
         private String currentClassName;
 
 
-        public EndpointClassVisitor(List<EndpointInfo> endpoints, String jarName, int port, String className) {
+        public EndpointClassVisitor(List<EndpointInfo> endpoints, String jarName, int port, String contextPath, String className) {
             super(Opcodes.ASM9); // Use latest ASM version
             this.endpoints = endpoints;
             this.jarName = jarName;
             this.port = port;
+            this.contextPath = contextPath;
             this.currentClassName = className;
-            logger.trace("Visiting class: {}. Looking for controller/endpoint annotations.", this.currentClassName);
+            logger.trace("Visiting class: {}. Looking for controller/endpoint annotations. ContextPath: '{}'", this.currentClassName, this.contextPath);
         }
 
         @Override
@@ -359,7 +385,7 @@ public class JarAnalyzer {
             logger.trace("Visiting method: {} in class {}. Class base path: {}", name, currentClassName, classLevelBasePath);
             // Pass class-level path and other necessary info to method visitor
             return new EndpointMethodVisitor(super.visitMethod(access, name, methodDescriptor, signature, exceptions),
-                                             endpoints, jarName, port, classLevelBasePath, currentClassName, name);
+                                             endpoints, jarName, port, classLevelBasePath, contextPath, currentClassName, name);
         }
 
         private String sanitizePath(String path) {
@@ -379,15 +405,17 @@ public class JarAnalyzer {
         private final String jarName;
         private final int port;
         private final String classLevelBasePath;
+        private final String contextPath;
         private final String className;
         private final String methodName;
 
-        public EndpointMethodVisitor(MethodVisitor methodVisitor, List<EndpointInfo> endpoints, String jarName, int port, String classLevelBasePath, String className, String methodName) {
+        public EndpointMethodVisitor(MethodVisitor methodVisitor, List<EndpointInfo> endpoints, String jarName, int port, String classLevelBasePath, String contextPath, String className, String methodName) {
             super(Opcodes.ASM9, methodVisitor);
             this.endpoints = endpoints;
             this.jarName = jarName;
             this.port = port;
             this.classLevelBasePath = classLevelBasePath;
+            this.contextPath = contextPath;
             this.className = className;
             this.methodName = methodName;
         }
@@ -482,8 +510,8 @@ public class JarAnalyzer {
                 fullPath = fullPath.substring(0, fullPath.length() - 1);
             }
 
-            endpoints.add(new EndpointInfo(jarName, httpMethod, fullPath, port));
-            logger.info("Discovered endpoint: {} {} (Port: {}, JAR: {})", httpMethod, fullPath, port, jarName);
+            endpoints.add(new EndpointInfo(jarName, httpMethod, fullPath, port, this.contextPath));
+            logger.info("Discovered endpoint: {} {} (Context: '{}', Port: {}, JAR: {})", httpMethod, fullPath, this.contextPath, port, jarName);
             this.methodLevelPath = ""; 
         }
 
@@ -698,5 +726,192 @@ public class JarAnalyzer {
             consumer.consume(httpMethodFixed, path);
             super.visitEnd();
         }
+    }
+    
+    private String parseContextPathFromYaml(InputStream yamlStream) {
+        if (yamlStream == null) return null;
+        try {
+            Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
+            Map<String, Object> yamlProps = yaml.load(yamlStream);
+            if (yamlProps == null) return null; // Handle empty YAML
+
+            Object contextPathObj = null;
+            // Try common nested paths first
+            if (yamlProps.containsKey("server")) {
+                Object serverObj = yamlProps.get("server");
+                if (serverObj instanceof Map) {
+                    Map<String, Object> serverMap = (Map<String, Object>) serverObj;
+                    if (serverMap.containsKey("servlet")) {
+                        Object servletObj = serverMap.get("servlet");
+                        if (servletObj instanceof Map) {
+                            contextPathObj = ((Map<String, Object>) servletObj).get("context-path");
+                        }
+                    }
+                    if (contextPathObj == null) { 
+                         contextPathObj = serverMap.get("context-path"); // e.g. server.context-path (less common for Spring Boot but possible)
+                    }
+                }
+            }
+            
+            if (contextPathObj == null && yamlProps.containsKey("spring")) {
+                 Object springObj = yamlProps.get("spring");
+                 if (springObj instanceof Map && ((Map)springObj).containsKey("webflux")) {
+                     Object wfObj = ((Map)springObj).get("webflux");
+                     if (wfObj instanceof Map) {
+                        contextPathObj = ((Map)wfObj).get("base-path");
+                     }
+                 }
+            }
+
+            if (contextPathObj == null && yamlProps.containsKey("micronaut")) {
+                Object micronautObj = yamlProps.get("micronaut");
+                if (micronautObj instanceof Map && ((Map)micronautObj).containsKey("server")) {
+                     Object serverObj = ((Map)micronautObj).get("server");
+                     if (serverObj instanceof Map) {
+                        contextPathObj = ((Map)serverObj).get("context-path");
+                     }
+                } else if (micronautObj instanceof Map) { // Direct micronaut.context-path
+                     contextPathObj = ((Map)micronautObj).get("context-path");
+                }
+            }
+            
+            if (contextPathObj == null && yamlProps.containsKey("quarkus")) {
+                 Object quarkusObj = yamlProps.get("quarkus");
+                 if (quarkusObj instanceof Map && ((Map)quarkusObj).containsKey("http")) {
+                     Object httpObj = ((Map)quarkusObj).get("http");
+                     if (httpObj instanceof Map) {
+                        contextPathObj = ((Map)httpObj).get("root-path");
+                     }
+                 } else if (quarkusObj instanceof Map) { // Direct quarkus.context-path
+                     contextPathObj = ((Map)quarkusObj).get("context-path"); // Or root-path directly under quarkus? Check conventions.
+                 }
+            }
+            
+            // Direct top-level keys as fallback
+            if (contextPathObj == null) {
+                String[] directKeys = {"server.servlet.context-path", "spring.webflux.base-path", "micronaut.server.context-path", "quarkus.http.root-path", "contextPath", "context-path", "base-path", "root-path"};
+                 for (String key : directKeys) {
+                    // Check if key exists directly (e.g. server.servlet.context-path: /api)
+                    // This form of direct key access is less common for complex keys in YAML maps.
+                    // The nested checks above are more typical for YAML.
+                    // However, if the YAML is flat, this might catch it.
+                    if (yamlProps.containsKey(key)) { 
+                        contextPathObj = yamlProps.get(key);
+                        if (contextPathObj != null) break;
+                    }
+                }
+            }
+
+            if (contextPathObj instanceof String) {
+                String contextPath = ((String) contextPathObj).trim();
+                if (!contextPath.isEmpty()) {
+                    logger.trace("Found context path '{}' in YAML", contextPath);
+                    return contextPath;
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to parse YAML for context path: {}", e.getMessage(), e);
+        }
+        return null;
+    }
+
+    private String parseContextPathFromProperties(InputStream propertiesStream) {
+        if (propertiesStream == null) return null;
+        try {
+            Properties props = new Properties();
+            props.load(propertiesStream);
+
+            String[] keysToTry = {
+                "server.servlet.context-path", 
+                "spring.webflux.base-path",
+                "micronaut.server.context-path", 
+                "quarkus.http.root-path",
+                "server.context-path", // Alternative spring
+                "contextPath", 
+                "context-path",
+                "base-path",
+                "root-path"
+            };
+            for (String key : keysToTry) {
+                String value = props.getProperty(key);
+                if (value != null) {
+                    String contextPath = value.trim();
+                    if (!contextPath.isEmpty()) {
+                        logger.trace("Found context path '{}' with key '{}' in properties", contextPath, key);
+                        return contextPath;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to read properties stream for context path: {}", e.getMessage(), e);
+        }
+        return null;
+    }
+
+    private String extractContextPathFromJar(JarFile jarFile, String jarNameForLogging) {
+        String[] yamlPathsToTry = {
+            "BOOT-INF/classes/application.yml", 
+            "BOOT-INF/classes/application.yaml",
+            "application.yml",
+            "application.yaml"
+        };
+        JarEntry ymlEntry = null;
+        String foundYmlPath = null;
+
+        for (String currentYmlPath : yamlPathsToTry) {
+            ymlEntry = jarFile.getJarEntry(currentYmlPath);
+            if (ymlEntry != null) {
+                foundYmlPath = currentYmlPath;
+                break;
+            }
+        }
+
+        if (ymlEntry != null) {
+            logger.debug("Found configuration file {} in JAR {} for context path extraction", foundYmlPath, jarNameForLogging);
+            try (InputStream inputStream = jarFile.getInputStream(ymlEntry)) {
+                String contextPath = parseContextPathFromYaml(inputStream);
+                if (contextPath != null && !contextPath.isEmpty()) {
+                    logger.info("Extracted context path '{}' from {} in JAR {}", contextPath, foundYmlPath, jarNameForLogging);
+                    return contextPath;
+                }
+            } catch (Exception e) {
+                logger.warn("Error reading/parsing {} for context path from JAR {}: {}", foundYmlPath, jarNameForLogging, e.getMessage(), e);
+            }
+        } else {
+            logger.debug("No application.yml or application.yaml found in standard locations in JAR {} for context path", jarNameForLogging);
+        }
+
+        String[] propsPathsToTry = {
+            "BOOT-INF/classes/application.properties",
+            "application.properties"
+        };
+        JarEntry propsEntry = null;
+        String foundPropsPath = null;
+
+        for (String currentPropsPath : propsPathsToTry) {
+            propsEntry = jarFile.getJarEntry(currentPropsPath);
+            if (propsEntry != null) {
+                foundPropsPath = currentPropsPath;
+                break;
+            }
+        }
+        
+        if (propsEntry != null) {
+            logger.debug("Found configuration file {} in JAR {} for context path extraction", foundPropsPath, jarNameForLogging);
+            try (InputStream inputStream = jarFile.getInputStream(propsEntry)) {
+                String contextPath = parseContextPathFromProperties(inputStream);
+                if (contextPath != null && !contextPath.isEmpty()) {
+                    logger.info("Extracted context path '{}' from {} in JAR {}", contextPath, foundPropsPath, jarNameForLogging);
+                    return contextPath;
+                }
+            } catch (Exception e) {
+                logger.warn("Error reading/parsing {} for context path from JAR {}: {}", foundPropsPath, jarNameForLogging, e.getMessage(), e);
+            }
+        } else {
+            logger.debug("No application.properties found in standard locations in JAR {} for context path", jarNameForLogging);
+        }
+        
+        logger.debug("No context path found in configuration files for JAR {}", jarNameForLogging);
+        return ""; // Return empty string if no context path is found, for safe concatenation
     }
 }

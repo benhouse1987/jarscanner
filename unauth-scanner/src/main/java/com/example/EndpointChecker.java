@@ -45,18 +45,30 @@ public class EndpointChecker {
      *         {@code false} if it returns 401 or an error occurs.
      */
     public boolean isEndpointAtRisk(EndpointInfo endpointInfo) {
-        String originalPath = endpointInfo.getPath();
-        String sanitizedPath = PATH_VARIABLE_PATTERN.matcher(originalPath).replaceAll(PATH_VARIABLE_PLACEHOLDER);
+        String contextPath = endpointInfo.getContextPath(); // Assuming "" if not set, not null
+        String endpointPath = endpointInfo.getPath();
 
-        if (!originalPath.equals(sanitizedPath)) {
-            logger.debug("Path variable(s) found in original path \"{}\". Sanitized to \"{}\" for checking.", originalPath, sanitizedPath);
+        String effectivePath = joinPaths(contextPath, endpointPath);
+        
+        String pathForSanitization = effectivePath; // Use effectivePath
+        String sanitizedPath = PATH_VARIABLE_PATTERN.matcher(pathForSanitization).replaceAll(PATH_VARIABLE_PLACEHOLDER);
+
+        if (!pathForSanitization.equals(sanitizedPath)) {
+            logger.debug("Path variable(s) found in effective path \"{}\". Sanitized to \"{}\" for checking.", pathForSanitization, sanitizedPath);
         }
-
+        
         String url = "http://localhost:" + endpointInfo.getPort() + sanitizedPath;
         String method = endpointInfo.getHttpMethod().toUpperCase();
         HttpUriRequest request;
 
-        logger.info("Checking endpoint: {} {} (on port {}){}", method, originalPath, endpointInfo.getPort(), originalPath.equals(sanitizedPath) ? "" : " [actual URL checked: " + url + "]");
+        String pathDisplay = (contextPath != null && !contextPath.isEmpty() ? contextPath : "") + endpointPath; 
+        logger.info("Checking endpoint: {} {} (Context: '{}', Path: '{}', Port: {}){}",
+                     method,
+                     pathDisplay, // Display combined original path
+                     contextPath == null ? "" : contextPath,
+                     endpointPath,
+                     endpointInfo.getPort(),
+                     pathForSanitization.equals(sanitizedPath) ? "" : " [sanitized URL for check: " + url + "]");
         logger.debug("Building {} request for URL: {}", method, url);
 
         try {
@@ -135,4 +147,29 @@ public class EndpointChecker {
             logger.error("Error closing HttpClient.", e);
         }
     }
+
+   private static String joinPaths(String... segments) {
+       StringBuilder result = new StringBuilder();
+       for (String segment : segments) {
+           if (segment == null || segment.isEmpty()) {
+               continue;
+           }
+           if (result.length() > 0 && result.charAt(result.length() - 1) == '/') {
+               if (segment.startsWith("/")) {
+                   result.append(segment.substring(1));
+               } else {
+                   result.append(segment);
+               }
+           } else {
+               if (segment.startsWith("/")) {
+                   result.append(segment);
+               } else {
+                   result.append("/");
+                   result.append(segment);
+               }
+           }
+       }
+       if (result.length() == 0) return "/"; // Should not happen if endpointPath is valid
+       return result.toString();
+   }
 }
