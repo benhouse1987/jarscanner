@@ -18,7 +18,7 @@ public class EndpointChecker {
     private static final Logger logger = LoggerFactory.getLogger(EndpointChecker.class);
     private static final int CONNECT_TIMEOUT = 5000; // 5 seconds
     private static final int SOCKET_TIMEOUT = 5000;  // 5 seconds
-    private static final String PATH_VARIABLE_PLACEHOLDER = "1";
+    private static final String PATH_VARIABLE_PLACEHOLDER = "-1098999aabb";
     private static final Pattern PATH_VARIABLE_PATTERN = Pattern.compile("\\{[^/]+?\\}");
 
     private final CloseableHttpClient httpClient;
