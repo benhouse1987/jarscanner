@@ -40,4 +40,5 @@ jobs:
     - name: 上传release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: ${{ github.event.inputs.tag }}
         files: target/unauth-scanner-1.0-SNAPSHOT.jar
