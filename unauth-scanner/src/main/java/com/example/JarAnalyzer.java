@@ -19,6 +19,8 @@ import java.util.regex.Pattern;
 import java.util.Properties;
 import java.util.Map;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.LoaderOptions;
 import java.io.IOException; // Already present via JarFile, but good to be explicit if used elsewhere
 
 public class JarAnalyzer {
@@ -113,42 +115,68 @@ public class JarAnalyzer {
         logger.debug("No port found in command line for JAR {}. Attempting to read from config files within the JAR.", jarNameForLogging);
 
         try (JarFile jarFile = new JarFile(jarPath)) {
-            // Try application.yml or application.yaml
-            JarEntry ymlEntry = jarFile.getJarEntry("application.yml");
-            if (ymlEntry == null) {
-                ymlEntry = jarFile.getJarEntry("application.yaml");
+            // Try application.yml or application.yaml in BOOT-INF/classes/ first, then root
+            String[] yamlPathsToTry = {
+                "BOOT-INF/classes/application.yml", 
+                "BOOT-INF/classes/application.yaml",
+                "application.yml",
+                "application.yaml"
+            };
+            JarEntry ymlEntry = null;
+            String foundYmlPath = null;
+
+            for (String currentYmlPath : yamlPathsToTry) {
+                ymlEntry = jarFile.getJarEntry(currentYmlPath);
+                if (ymlEntry != null) {
+                    foundYmlPath = currentYmlPath;
+                    break;
+                }
             }
 
             if (ymlEntry != null) {
-                logger.debug("Found {} in JAR {}", ymlEntry.getName(), jarNameForLogging);
+                logger.debug("Found configuration file {} in JAR {}", foundYmlPath, jarNameForLogging);
                 try (InputStream inputStream = jarFile.getInputStream(ymlEntry)) {
                     Integer portFromYaml = parsePortFromYaml(inputStream);
                     if (portFromYaml != null) {
-                        logger.info("Extracted port {} from {} in JAR {}", portFromYaml, ymlEntry.getName(), jarNameForLogging);
+                        logger.info("Extracted port {} from {} in JAR {}", portFromYaml, foundYmlPath, jarNameForLogging);
                         return portFromYaml;
                     }
                 } catch (Exception e) {
-                    logger.warn("Error parsing {} from JAR {}: {}", ymlEntry.getName(), jarNameForLogging, e.getMessage(), e);
+                    logger.warn("Error parsing {} from JAR {}: {}", foundYmlPath, jarNameForLogging, e.getMessage(), e);
                 }
             } else {
-                logger.debug("No application.yml or application.yaml found in JAR {}", jarNameForLogging);
+                logger.debug("No application.yml or application.yaml found in standard locations in JAR {}", jarNameForLogging);
             }
 
-            // Try application.properties
-            JarEntry propsEntry = jarFile.getJarEntry("application.properties");
+            // Try application.properties in BOOT-INF/classes/ first, then root
+            String[] propsPathsToTry = {
+                "BOOT-INF/classes/application.properties",
+                "application.properties"
+            };
+            JarEntry propsEntry = null;
+            String foundPropsPath = null;
+
+            for (String currentPropsPath : propsPathsToTry) {
+                propsEntry = jarFile.getJarEntry(currentPropsPath);
+                if (propsEntry != null) {
+                    foundPropsPath = currentPropsPath;
+                    break;
+                }
+            }
+            
             if (propsEntry != null) {
-                logger.debug("Found application.properties in JAR {}", jarNameForLogging);
+                logger.debug("Found configuration file {} in JAR {}", foundPropsPath, jarNameForLogging);
                 try (InputStream inputStream = jarFile.getInputStream(propsEntry)) {
                     Integer portFromProperties = parsePortFromProperties(inputStream);
                     if (portFromProperties != null) {
-                        logger.info("Extracted port {} from application.properties in JAR {}", portFromProperties, jarNameForLogging);
+                        logger.info("Extracted port {} from {} in JAR {}", portFromProperties, foundPropsPath, jarNameForLogging);
                         return portFromProperties;
                     }
                 } catch (Exception e) {
-                    logger.warn("Error parsing application.properties from JAR {}: {}", jarNameForLogging, e.getMessage(), e);
+                    logger.warn("Error parsing {} from JAR {}: {}", foundPropsPath, jarNameForLogging, e.getMessage(), e);
                 }
             } else {
-                logger.debug("No application.properties found in JAR {}", jarNameForLogging);
+                logger.debug("No application.properties found in standard locations in JAR {}", jarNameForLogging);
             }
 
         } catch (IOException e) {
@@ -163,7 +191,7 @@ public class JarAnalyzer {
     private Integer parsePortFromYaml(InputStream yamlStream) {
         if (yamlStream == null) return null;
         try {
-            Yaml yaml = new Yaml();
+            Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
             Map<String, Object> yamlProps = yaml.load(yamlStream);
 
             // Common keys for server port
@@ -210,7 +238,8 @@ public class JarAnalyzer {
                                  Object jsonStrObj = appMap.get("json");
                                  if (jsonStrObj instanceof String) {
                                      try {
-                                         Map<String, Object> embeddedJson = yaml.load((String)jsonStrObj);
+                                         // For embedded JSON, we might need a separate Yaml instance or ensure this one is fine
+                                         Map<String, Object> embeddedJson = new Yaml(new SafeConstructor(new LoaderOptions())).load((String)jsonStrObj);
                                          if (embeddedJson.containsKey("server") && embeddedJson.get("server") instanceof Map) {
                                              Map<String, Object> serverMapJson = (Map<String,Object>) embeddedJson.get("server");
                                              Object portObjJson = serverMapJson.get("port");
