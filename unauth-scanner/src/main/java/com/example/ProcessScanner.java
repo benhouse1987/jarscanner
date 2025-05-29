@@ -30,7 +30,7 @@ public class ProcessScanner {
         OperatingSystem os = si.getOperatingSystem();
 
         // Pattern to identify a JAR file in the command line when launched with -jar
-        Pattern jarArgumentPattern = Pattern.compile("(?:\\s|-jar\\s+)([^\\s]+\\.jar)(?:\\s|$)");
+        Pattern jarArgumentPattern = Pattern.compile("\\-jar\\s+([^\\s]+\\.jar)");
         // General pattern to find any .jar string in the command line (for -cp cases)
         Pattern cpJarPattern = Pattern.compile("([^\\s]+\\.jar)");
 
@@ -56,6 +56,7 @@ public class ProcessScanner {
             // Check if the process is likely a Java process
             if (processName.contains("java") || commandLine.toLowerCase().contains("java")) {
                 logger.debug("Identified potential Java process: PID={}, Command={}", pid, commandLine);
+                logger.debug("Attempting to match -jar pattern for PID: {}. Command: {}", pid, commandLine);
                 Matcher jarArgMatcher = jarArgumentPattern.matcher(commandLine);
                 String jarPath = null;
 
