@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/jarscanner.iml" filepath="$PROJECT_DIR$/.idea/jarscanner.iml" />
+      <module fileurl="file://$PROJECT_DIR$/unauth-scanner/unauth-scanner.iml" filepath="$PROJECT_DIR$/unauth-scanner/unauth-scanner.iml" />
     </modules>
   </component>
 </project>
