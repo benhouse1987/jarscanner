@@ -3,6 +3,10 @@ package com.example;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import oshi.SystemInfo;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.util.Collections;
 import oshi.software.os.OSProcess;
 import oshi.software.os.OperatingSystem;
 
@@ -16,6 +20,7 @@ import java.util.regex.Pattern;
 public class ProcessScanner {
 
     private static final Logger logger = LoggerFactory.getLogger(ProcessScanner.class);
+    private static final int DEFAULT_PORT = 8080; // Default port if detection fails
 
     /**
      * Finds running Java processes and extracts details like JAR path, command line, and PID.
@@ -80,16 +85,17 @@ public class ProcessScanner {
                 }
 
                 if (jarPath != null) {
-                    String identifier = jarPath + "::" + pid; // Combine JAR path and PID for uniqueness
+                    int port = detectPortForProcess(pid); // Call the new method
+                    String identifier = jarPath + "::" + pid; 
                     if (!uniqueJarIdentifiers.contains(identifier)) {
-                        logger.debug("Adding unique Java process to list: PID={}, JAR Path={}", pid, jarPath);
-                        processDetailsList.add(new JavaProcessDetails(jarPath, commandLine, pid));
+                        logger.debug("Adding unique Java process to list: PID={}, JAR Path={}, Port={}", pid, jarPath, port);
+                        processDetailsList.add(new JavaProcessDetails(jarPath, commandLine, pid, port)); // Pass port
                         uniqueJarIdentifiers.add(identifier);
                     } else {
-                        logger.trace("Duplicate Java process based on JAR path and PID already processed: PID={}, JAR Path={}", pid, jarPath);
+                        logger.trace("Duplicate Java process based on JAR path and PID already processed: PID={}, JAR Path={}, Port={}", pid, jarPath, port);
                     }
                 } else {
-                     logger.debug("Could not extract JAR path for PID: {}. Full command: {}", pid, commandLine);
+                     logger.debug("Could not extract JAR path for PID: {}. Full command: {}. Skipping port detection and addition to list.", pid, commandLine);
                      // If no JAR found via -jar or in -cp, but it's a "java" process,
                      // it might be a bare class execution or something else.
                      // We can still record it, though JAR-based analysis won't be possible.
@@ -102,4 +108,83 @@ public class ProcessScanner {
         }
         return processDetailsList;
     }
+
+   private int detectPortForProcess(int pid) {
+       logger.debug("Attempting to detect port for PID {} using netstat.", pid);
+       List<Integer> foundPorts = new ArrayList<>();
+       Pattern netstatPattern = Pattern.compile("(?i)(?:tcp|tcp6)\\s+\\d+\\s+\\d+\\s+(?:[\\d.:]+|\\[::\\]):(\\d+)\\s+.*(?:LISTEN|VERBUNDEN).*?" + pid + "/java");
+       // Explanation of regex:
+       // (?i) - case insensitive for LISTEN/java
+       // (?:tcp|tcp6) - matches tcp or tcp6
+       // \s+\d+\s+\d+\s+ - matches recv-q, send-q columns
+       // (?:[\d.:]+|\[::\]):(\d+) - matches local address (e.g., 0.0.0.0:8080, :::8080, 127.0.0.1:8080) and captures port in group 1
+       // \s+.*(?:LISTEN|VERBUNDEN) - matches through to LISTEN (English/German) or VERBUNDEN (German for ESTABLISHED, sometimes seen with LISTEN)
+       // .*? - non-greedy match until...
+       // " + pid + "/java" - matches the PID/java program name
+
+       try {
+           ProcessBuilder pb = new ProcessBuilder("sh", "-c", "netstat -tulnp 2>/dev/null");
+           Process process = pb.start();
+           
+           StringBuilder output = new StringBuilder();
+           try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+               String line;
+               while ((line = reader.readLine()) != null) {
+                   output.append(line).append(System.lineSeparator());
+                   Matcher matcher = netstatPattern.matcher(line);
+                   if (matcher.find()) {
+                       String portStr = matcher.group(1);
+                       try {
+                           int port = Integer.parseInt(portStr);
+                           logger.trace("Found potential port {} for PID {} from netstat line: {}", port, pid, line.trim());
+                           foundPorts.add(port);
+                       } catch (NumberFormatException e) {
+                           logger.warn("Could not parse port '{}' from netstat line: {}", portStr, line.trim());
+                       }
+                   }
+               }
+           }
+           logger.trace("Full netstat output for PID {}:\n{}", pid, output); // Log full output at TRACE
+
+           int exitCode = process.waitFor();
+           if (exitCode != 0) {
+               logger.warn("netstat command exited with code {} for PID {}", exitCode, pid);
+           }
+
+       } catch (IOException | InterruptedException e) {
+           logger.error("Error executing or reading output from netstat for PID {}: {}", pid, e.getMessage(), e);
+           Thread.currentThread().interrupt(); // Restore interrupted status
+           return DEFAULT_PORT;
+       }
+
+       if (foundPorts.isEmpty()) {
+           logger.debug("No listening port found for PID {} via netstat.", pid);
+           return DEFAULT_PORT;
+       }
+
+       // Heuristic for choosing a port if multiple are found
+       Collections.sort(foundPorts); // Sort to have a consistent order
+
+       // Prefer common HTTP ports
+       int[] preferredPorts = {8080, 8000, 8081, 9000, 80, 443};
+       for (int preferred : preferredPorts) {
+           if (foundPorts.contains(preferred)) {
+               logger.info("Selected preferred port {} for PID {} from multiple options: {}", preferred, pid, foundPorts);
+               return preferred;
+           }
+       }
+       
+       // Prefer ports in typical web application ranges (e.g., 8000-9999) over others
+       for (int port : foundPorts) {
+           if (port >= 8000 && port <= 9999) {
+               logger.info("Selected port {} (in 8000-9999 range) for PID {} from multiple options: {}", port, pid, foundPorts);
+               return port;
+           }
+       }
+
+       // Otherwise, take the first one found (lowest number due to sort)
+       int chosenPort = foundPorts.get(0);
+       logger.info("Selected port {} (first from sorted list) for PID {} from multiple options: {}", chosenPort, pid, foundPorts);
+       return chosenPort;
+   }
 }
