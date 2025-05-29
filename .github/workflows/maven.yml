@@ -34,9 +34,6 @@ jobs:
     - name: Build with Maven
       run: mvn -B package --file pom.xml
     - name: 上传release
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v1
       with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: target/unauth-scanner-1.0-SNAPSHOT.jar
-        asset_name: jarscanner.jar
-        asset_content_type: application/java-archive
+        files: target/unauth-scanner-1.0-SNAPSHOT.jar
