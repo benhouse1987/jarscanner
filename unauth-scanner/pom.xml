@@ -59,6 +59,11 @@
             <artifactId>logback-classic</artifactId>
             <version>1.2.6</version>
         </dependency>
+        <dependency>
+            <groupId>org.yaml.snakeyaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.29</version>
+        </dependency>
     </dependencies>
 
     <build>

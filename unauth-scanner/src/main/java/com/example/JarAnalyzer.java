@@ -16,6 +16,10 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Properties;
+import java.util.Map;
+import org.yaml.snakeyaml.Yaml;
+import java.io.IOException; // Already present via JarFile, but good to be explicit if used elsewhere
 
 public class JarAnalyzer {
 
@@ -37,7 +41,7 @@ public class JarAnalyzer {
 
 
         logger.debug("Attempting to extract port from command line for JAR: {}", jarPath);
-        int port = extractPort(commandLine, jarName); // Pass jarName for logging
+        int port = extractPort(commandLine, jarPath, jarName); // Pass jarPath for config file reading
 
         try (JarFile jarFile = new JarFile(jarPath)) {
             logger.trace("Successfully opened JAR file: {}", jarPath);
@@ -69,10 +73,11 @@ public class JarAnalyzer {
      * Defaults to {@value #DEFAULT_PORT} if no port argument is found.
      *
      * @param commandLine The command line string of the Java process.
+     * @param jarPath The full path to the JAR file, for reading internal config files.
      * @param jarNameForLogging Name of the JAR for logging purposes.
      * @return The extracted port or the default port.
      */
-    private int extractPort(String commandLine, String jarNameForLogging) {
+    private int extractPort(String commandLine, String jarPath, String jarNameForLogging) {
         logger.debug("Using regex to find port in command line: {}", commandLine);
         // Regex to find port arguments like -Dserver.port=XXXX, --server.port=XXXX,
         // -Dhttp.port=XXXX, --http.port=XXXX, -Ddw.server.applicationConnectors[0].port=XXXX etc.
@@ -103,10 +108,155 @@ public class JarAnalyzer {
                 }
             }
         }
-        logger.info("No specific port found in command line for JAR {}. Defaulting to {}", jarNameForLogging, DEFAULT_PORT);
+
+        // If port not found from command line, try reading from JAR config files
+        logger.debug("No port found in command line for JAR {}. Attempting to read from config files within the JAR.", jarNameForLogging);
+
+        try (JarFile jarFile = new JarFile(jarPath)) {
+            // Try application.yml or application.yaml
+            JarEntry ymlEntry = jarFile.getJarEntry("application.yml");
+            if (ymlEntry == null) {
+                ymlEntry = jarFile.getJarEntry("application.yaml");
+            }
+
+            if (ymlEntry != null) {
+                logger.debug("Found {} in JAR {}", ymlEntry.getName(), jarNameForLogging);
+                try (InputStream inputStream = jarFile.getInputStream(ymlEntry)) {
+                    Integer portFromYaml = parsePortFromYaml(inputStream);
+                    if (portFromYaml != null) {
+                        logger.info("Extracted port {} from {} in JAR {}", portFromYaml, ymlEntry.getName(), jarNameForLogging);
+                        return portFromYaml;
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error parsing {} from JAR {}: {}", ymlEntry.getName(), jarNameForLogging, e.getMessage(), e);
+                }
+            } else {
+                logger.debug("No application.yml or application.yaml found in JAR {}", jarNameForLogging);
+            }
+
+            // Try application.properties
+            JarEntry propsEntry = jarFile.getJarEntry("application.properties");
+            if (propsEntry != null) {
+                logger.debug("Found application.properties in JAR {}", jarNameForLogging);
+                try (InputStream inputStream = jarFile.getInputStream(propsEntry)) {
+                    Integer portFromProperties = parsePortFromProperties(inputStream);
+                    if (portFromProperties != null) {
+                        logger.info("Extracted port {} from application.properties in JAR {}", portFromProperties, jarNameForLogging);
+                        return portFromProperties;
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error parsing application.properties from JAR {}: {}", jarNameForLogging, e.getMessage(), e);
+                }
+            } else {
+                logger.debug("No application.properties found in JAR {}", jarNameForLogging);
+            }
+
+        } catch (IOException e) {
+            logger.warn("Error opening JAR file {} to read config: {}", jarPath, e.getMessage(), e);
+            // If JAR can't be opened, we can't read config, so proceed to default.
+        }
+
+        logger.info("No specific port found in command line or config files for JAR {}. Defaulting to {}", jarNameForLogging, DEFAULT_PORT);
         return DEFAULT_PORT;
     }
 
+    private Integer parsePortFromYaml(InputStream yamlStream) {
+        if (yamlStream == null) return null;
+        try {
+            Yaml yaml = new Yaml();
+            Map<String, Object> yamlProps = yaml.load(yamlStream);
+
+            // Common keys for server port
+            String[] keysToTry = {"server.port", "micronaut.server.port", "quarkus.http.port"};
+            // Spring Boot often has server: port: XXXX
+            // Also spring.application.json variant
+            // server:
+            //   port: 8081
+            // spring:
+            //   application:
+            //     json: '{"server":{"port":1234}}' (less common for just port)
+
+
+            for (String key : keysToTry) {
+                 Object value = yamlProps.get(key);
+                 if (value instanceof Integer) return (Integer) value;
+                 if (value instanceof String) {
+                     try { return Integer.parseInt((String) value); } catch (NumberFormatException e) { /* ignore */ }
+                 }
+            }
+            
+            // Check for nested server.port (e.g. Spring Boot default structure)
+            if (yamlProps.containsKey("server")) {
+                Object serverObj = yamlProps.get("server");
+                if (serverObj instanceof Map) {
+                    Map<String, Object> serverMap = (Map<String, Object>) serverObj;
+                    Object portObj = serverMap.get("port");
+                    if (portObj instanceof Integer) return (Integer) portObj;
+                    if (portObj instanceof String) {
+                        try { return Integer.parseInt((String) portObj); } catch (NumberFormatException e) { /* ignore */ }
+                    }
+                }
+            }
+             // Check for spring.application.json embedded JSON string
+             if (yamlProps.containsKey("spring")) {
+                 Object springObj = yamlProps.get("spring");
+                 if (springObj instanceof Map) {
+                     Map<String, Object> springMap = (Map<String, Object>) springObj;
+                     if (springMap.containsKey("application")) {
+                         Object appObj = springMap.get("application");
+                         if (appObj instanceof Map) {
+                             Map<String, Object> appMap = (Map<String, Object>) appObj;
+                             if (appMap.containsKey("json")) {
+                                 Object jsonStrObj = appMap.get("json");
+                                 if (jsonStrObj instanceof String) {
+                                     try {
+                                         Map<String, Object> embeddedJson = yaml.load((String)jsonStrObj);
+                                         if (embeddedJson.containsKey("server") && embeddedJson.get("server") instanceof Map) {
+                                             Map<String, Object> serverMapJson = (Map<String,Object>) embeddedJson.get("server");
+                                             Object portObjJson = serverMapJson.get("port");
+                                             if (portObjJson instanceof Integer) return (Integer) portObjJson;
+                                             if (portObjJson instanceof String) return Integer.parseInt((String)portObjJson);
+                                         }
+                                     } catch (Exception e) {
+                                         logger.trace("Could not parse embedded JSON in spring.application.json for port: {}", e.getMessage());
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+
+
+        } catch (Exception e) {
+            logger.warn("Failed to parse YAML for port number: {}", e.getMessage(), e);
+        }
+        return null;
+    }
+
+    private Integer parsePortFromProperties(InputStream propertiesStream) {
+        if (propertiesStream == null) return null;
+        try {
+            Properties props = new Properties();
+            props.load(propertiesStream);
+
+            String[] keysToTry = {"server.port", "micronaut.server.port", "quarkus.http.port", "http.port"};
+            for (String key : keysToTry) {
+                String value = props.getProperty(key);
+                if (value != null) {
+                    try {
+                        return Integer.parseInt(value.trim());
+                    } catch (NumberFormatException e) {
+                        logger.warn("Non-integer value for port '{}' in properties: {}", value, key);
+                        // continue to next key
+                    }
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to read properties stream for port number: {}", e.getMessage(), e);
+        }
+        return null;
+    }
 
     /**
      * Utility to get a shorter name from a JAR path (e.g., the file name).
