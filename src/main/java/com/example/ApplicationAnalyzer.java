@@ -706,6 +706,8 @@ public class ApplicationAnalyzer {
     // Renamed for clarity, behavior is largely the same for now
     private String extractContextPathFromJar(JarFile appFile, String appNameForLogging) {
         String[] yamlPathsToTry = {
+                "BOOT-INF/classes/config/application.yml",
+                "BOOT-INF/classes/config/application.yaml",
                 "BOOT-INF/classes/application.yml",
                 "BOOT-INF/classes/application.yaml",
                 "application.yml",
@@ -742,6 +744,7 @@ public class ApplicationAnalyzer {
 
         String[] propsPathsToTry = {
                 "BOOT-INF/classes/application.properties",
+                "BOOT-INF/classes/config/application.properties",
                 "application.properties",
                 // WAR specific paths
                 "WEB-INF/classes/application.properties"

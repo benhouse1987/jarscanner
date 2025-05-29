@@ -47,25 +47,27 @@ public class CsvReporter {
      *
      * @param endpointInfo Details of the endpoint at risk.
      */
-    public void addRiskEntry(EndpointInfo endpointInfo) {
+    public void addRiskEntry(EndpointInfo endpointInfo,int status) {
         if (this.csvPrinter == null) {
             logger.error("CSVPrinter not initialized. Cannot add risk entry for endpoint: {}", endpointInfo);
             return;
         }
         try {
             String contextPath = endpointInfo.getContextPath() == null ? "" : endpointInfo.getContextPath();
-            logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Port={}, Method={}, ContextPath='{}', Path={}",
+            logger.debug("Adding at-risk endpoint to CSV report: JAR={}, Port={}, Method={}, ContextPath='{}', Path={}, status={}",
                          endpointInfo.getJarName(),
                          endpointInfo.getPort(),
                          endpointInfo.getHttpMethod(),
                          contextPath,
-                         endpointInfo.getPath());
+                         endpointInfo.getPath(),
+                    status);
             this.csvPrinter.printRecord(
                     endpointInfo.getJarName(),
                     endpointInfo.getPort(),
                     endpointInfo.getHttpMethod(),
                     contextPath,
-                    endpointInfo.getPath()
+                    endpointInfo.getPath(),
+                    status
             );
         } catch (IOException e) {
             logger.error("Error writing record to CSV for endpoint {}: {}", endpointInfo, e.getMessage(), e);

@@ -74,12 +74,13 @@ public class Main {
                             for (EndpointInfo endpoint : endpoints) {
                                 // Changed JarName to AppName for clarity, as it can be JAR or WAR
                                 logger.debug("Checking endpoint: {} {} for App {}", endpoint.getHttpMethod(), endpoint.getPath(), endpoint.getJarName());
-                                boolean atRisk = endpointChecker.isEndpointAtRisk(endpoint);
+                                int status = endpointChecker.isEndpointAtRisk(endpoint);
+                                boolean atRisk = (status!=401 && status!=403);
                                 logger.info("Endpoint {} {} risk status: {}", endpoint.getHttpMethod(), endpoint.getPath(), (atRisk ? "AT RISK" : "NOT AT RISK"));
                                 if (atRisk) {
                                     totalAtRiskEndpoints++;
                                     if (csvReporter != null) {
-                                        csvReporter.addRiskEntry(endpoint);
+                                        csvReporter.addRiskEntry(endpoint,status);
                                     }
                                 }
                             }

@@ -44,7 +44,7 @@ public class EndpointChecker {
      * @return {@code true} if the endpoint is accessible and does not return 401,
      *         {@code false} if it returns 401 or an error occurs.
      */
-    public boolean isEndpointAtRisk(EndpointInfo endpointInfo) {
+    public int isEndpointAtRisk(EndpointInfo endpointInfo) {
         String contextPath = endpointInfo.getContextPath(); // Assuming "" if not set, not null
         String endpointPath = endpointInfo.getPath();
 
@@ -84,7 +84,7 @@ public class EndpointChecker {
                         postRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
                         logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
-                        return false; 
+                        return -1;
                     }
                     request = postRequest;
                     break;
@@ -96,7 +96,7 @@ public class EndpointChecker {
                         putRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
                         logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
-                        return false; 
+                        return -1;
                     }
                     request = putRequest;
                     break;
@@ -111,7 +111,7 @@ public class EndpointChecker {
                         patchRequest.setHeader("Content-Type", "application/json");
                     } catch (UnsupportedEncodingException e) {
                          logger.warn("Error setting entity for {} request to {}: {}", method, url, e.getMessage(), e);
-                        return false;
+                        return -1;
                     }
                     request = patchRequest;
                     break;
@@ -126,12 +126,12 @@ public class EndpointChecker {
                 int statusCode = response.getStatusLine().getStatusCode();
                 logger.debug("Response for {} request to {}: Status {}", method, url, statusCode);
                 EntityUtils.consumeQuietly(response.getEntity()); 
-                return statusCode != 401; // At risk if not 401
+                return statusCode; // At risk if not 401
             }
         } catch (IOException e) {
             logger.warn("Error executing {} request to {}: {}. Endpoint considered not at risk due to error.", method, url, e.getMessage());
             logger.debug("Full exception details for {} {}:", method, url, e); 
-            return false; 
+            return -1;
         }
     }
 
